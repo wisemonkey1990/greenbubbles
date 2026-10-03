@@ -25,6 +25,7 @@ pub mod model;
 mod nested_xml;
 pub mod operator;
 pub mod personal_memory;
+pub mod platform;
 pub mod progress;
 pub mod query_profile;
 pub mod reconcile;

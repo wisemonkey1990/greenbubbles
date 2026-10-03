@@ -1,8 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -1342,10 +1341,10 @@ pub fn prepare_personal_memory_corpus_with_progress(
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-personal-memory-")
         .tempdir_in(parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
     let batches_directory = staging.path().join("batches");
     fs::create_dir(&batches_directory)?;
-    fs::set_permissions(&batches_directory, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(&batches_directory, 0o700)?;
 
     let mut files = Vec::<CorpusFileRecord>::new();
     let contacts_path = staging.path().join("contacts.jsonl");
@@ -2426,10 +2425,10 @@ pub fn prepare_personal_memory_corpus_extend_with_progress(
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-personal-memory-extend-")
         .tempdir_in(parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
     let batches_directory = staging.path().join("batches");
     fs::create_dir(&batches_directory)?;
-    fs::set_permissions(&batches_directory, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(&batches_directory, 0o700)?;
 
     let mut files = Vec::<CorpusFileRecord>::new();
 
@@ -3292,7 +3291,7 @@ fn read_regular_file_limited(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>,
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
     {
         return Err(RestoreError::Integrity(
@@ -3325,7 +3324,7 @@ fn owner_only_writer(path: &Path) -> Result<BufWriter<File>, RestoreError> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     Ok(BufWriter::new(file))
 }
@@ -3858,9 +3857,7 @@ struct StateLock {
 
 impl Drop for StateLock {
     fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
-        }
+        let _ = self.file.unlock();
     }
 }
 
@@ -6209,10 +6206,9 @@ fn acquire_state_lock(state_path: &Path) -> Result<StateLock, RestoreError> {
         .write(true)
         .create(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(lock_path)?;
-    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if result != 0 {
+    if file.try_lock().is_err() {
         return Err(RestoreError::Integrity(
             "memory state is already locked by another GreenBubbles process".into(),
         ));
@@ -6505,7 +6501,7 @@ fn write_state_atomic(path: &Path, state: &MemoryRunState) -> Result<(), Restore
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(&temporary)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
@@ -6565,7 +6561,7 @@ fn immutable_owner_file_metadata(path: &Path) -> Result<fs::Metadata, RestoreErr
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.permissions().mode() & 0o777 != 0o400
         || metadata.nlink() != 1
     {
@@ -6583,7 +6579,7 @@ fn corpus_owner_file_metadata(path: &Path) -> Result<fs::Metadata, RestoreError>
     let mode = metadata.permissions().mode() & 0o777;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || (mode != 0o400 && mode != 0o600)
         || metadata.nlink() != 1
     {
@@ -6628,7 +6624,7 @@ fn protect_extendable_corpus_tree(root: &Path) -> Result<(), RestoreError> {
             )
         })?;
         let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.file_type().is_symlink() || metadata.uid() != unsafe { libc::geteuid() } {
+        if metadata.file_type().is_symlink() || metadata.uid() != crate::platform::geteuid() {
             return Err(RestoreError::Integrity(
                 "prepared corpus tree contains an unsafe entry".into(),
             ));
@@ -6639,9 +6635,9 @@ fn protect_extendable_corpus_tree(root: &Path) -> Result<(), RestoreError> {
                     "prepared corpus tree contains a multiply linked file".into(),
                 ));
             }
-            fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o600))?;
+            crate::platform::set_mode(entry.path(), 0o600)?;
         } else if metadata.is_dir() {
-            fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o700))?;
+            crate::platform::set_mode(entry.path(), 0o700)?;
         } else {
             return Err(RestoreError::Integrity(
                 "prepared corpus tree contains a non-file, non-directory entry".into(),
@@ -6667,7 +6663,7 @@ fn protect_immutable_corpus_tree(root: &Path) -> Result<(), RestoreError> {
             RestoreError::Integrity("prepared corpus tree could not be finalized safely".into())
         })?;
         let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.file_type().is_symlink() || metadata.uid() != unsafe { libc::geteuid() } {
+        if metadata.file_type().is_symlink() || metadata.uid() != crate::platform::geteuid() {
             return Err(RestoreError::Integrity(
                 "prepared corpus tree contains an unsafe entry".into(),
             ));
@@ -6678,12 +6674,12 @@ fn protect_immutable_corpus_tree(root: &Path) -> Result<(), RestoreError> {
                     "prepared corpus tree contains a multiply linked file".into(),
                 ));
             }
-            fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o400))?;
+            crate::platform::set_mode(entry.path(), 0o400)?;
         } else if metadata.is_dir() {
             if entry.path() == root {
                 continue;
             }
-            fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o500))?;
+            crate::platform::set_mode(entry.path(), 0o500)?;
         } else {
             return Err(RestoreError::Integrity(
                 "prepared corpus tree contains a non-file, non-directory entry".into(),
@@ -6703,12 +6699,12 @@ fn seal_published_corpus_root(root: &Path) -> Result<(), RestoreError> {
             "published corpus root is not a directory".into(),
         ));
     }
-    if metadata.uid() != unsafe { libc::geteuid() } {
+    if metadata.uid() != crate::platform::geteuid() {
         return Err(RestoreError::Integrity(
             "published corpus root is owned by another account".into(),
         ));
     }
-    fs::set_permissions(root, fs::Permissions::from_mode(0o500))?;
+    crate::platform::set_mode(root, 0o500)?;
     Ok(())
 }
 
@@ -6736,7 +6732,7 @@ fn scan_wiki(wiki_directory: &Path) -> Result<BTreeMap<String, WikiFileSnapshot>
             .map(|relative| relative.to_string_lossy().into_owned())
             .unwrap_or_else(|_| entry.path().to_string_lossy().into_owned());
         let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.file_type().is_symlink() || metadata.uid() != unsafe { libc::geteuid() } {
+        if metadata.file_type().is_symlink() || metadata.uid() != crate::platform::geteuid() {
             return Err(RestoreError::Integrity(format!(
                 "wiki entry {relative_display} must be current-user-owned and may not be a symbolic link"
             )));
@@ -7655,8 +7651,7 @@ mod personal_memory_tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
         // Set dir permissions to 0700 (owner-only) so scan_wiki / ensure_private_directory passes
-        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-            .unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         // No manifest.py → should fail
         let result = validate_python_format_commit(path);
         assert!(result.is_err(), "expected error when manifest.py is absent");
@@ -7667,14 +7662,14 @@ mod personal_memory_tests {
     #[test]
     fn python_commit_rejects_invalid_python_syntax() {
         use super::validate_python_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         // Write a syntactically broken manifest.py
         let manifest = path.join("manifest.py");
         std::fs::write(&manifest, b"def broken(\n").unwrap();
-        std::fs::set_permissions(&manifest, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&manifest, 0o600).unwrap();
         let result = validate_python_format_commit(path);
         assert!(result.is_err(), "expected syntax error to be rejected");
         let msg = result.unwrap_err().to_string();
@@ -7687,18 +7682,18 @@ mod personal_memory_tests {
     #[test]
     fn python_commit_rejects_disallowed_extensions() {
         use super::validate_python_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         // Valid manifest.py
         let manifest = path.join("manifest.py");
         std::fs::write(&manifest, b"x = 1\n").unwrap();
-        std::fs::set_permissions(&manifest, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&manifest, 0o600).unwrap();
         // Binary file with disallowed extension
         let binary = path.join("data.bin");
         std::fs::write(&binary, b"\x00\x01\x02").unwrap();
-        std::fs::set_permissions(&binary, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&binary, 0o600).unwrap();
         let result = validate_python_format_commit(path);
         assert!(
             result.is_err(),
@@ -7714,14 +7709,14 @@ mod personal_memory_tests {
     #[test]
     fn python_commit_accepts_valid_directory() {
         use super::validate_python_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         // Valid manifest.py
         let manifest = path.join("manifest.py");
         std::fs::write(&manifest, b"schema = 'memory-v1'\n").unwrap();
-        std::fs::set_permissions(&manifest, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&manifest, 0o600).unwrap();
         // python3 must be available in the test environment; skip if not
         if std::process::Command::new("python3")
             .arg("--version")
@@ -7740,25 +7735,25 @@ mod personal_memory_tests {
     #[test]
     fn python_commit_allows_hidden_files_and_git_dir() {
         use super::validate_python_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         // Valid manifest.py
         let manifest = path.join("manifest.py");
         std::fs::write(&manifest, b"x = 1\n").unwrap();
-        std::fs::set_permissions(&manifest, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&manifest, 0o600).unwrap();
         // .gitignore — hidden file, should be skipped
         let gitignore = path.join(".gitignore");
         std::fs::write(&gitignore, b"__pycache__/\n").unwrap();
-        std::fs::set_permissions(&gitignore, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&gitignore, 0o600).unwrap();
         // .git/config — file inside hidden directory, should be skipped
         let git_dir = path.join(".git");
         std::fs::create_dir(&git_dir).unwrap();
-        std::fs::set_permissions(&git_dir, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&git_dir, 0o700).unwrap();
         let git_config = git_dir.join("config");
         std::fs::write(&git_config, b"[core]\n").unwrap();
-        std::fs::set_permissions(&git_config, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&git_config, 0o600).unwrap();
         if std::process::Command::new("python3")
             .arg("--version")
             .status()
@@ -7779,10 +7774,10 @@ mod personal_memory_tests {
     #[test]
     fn markdown_commit_requires_manifest_md() {
         use super::validate_markdown_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         let result = validate_markdown_format_commit(path);
         assert!(result.is_err(), "expected error when manifest.md is absent");
         let msg = result.unwrap_err().to_string();
@@ -7792,20 +7787,20 @@ mod personal_memory_tests {
     #[test]
     fn markdown_commit_rejects_domains_file_missing_required_headings() {
         use super::validate_markdown_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         let manifest = path.join("manifest.md");
         std::fs::write(&manifest, b"# Memory\n").unwrap();
-        std::fs::set_permissions(&manifest, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&manifest, 0o600).unwrap();
         let domains = path.join("domains");
         std::fs::create_dir(&domains).unwrap();
-        std::fs::set_permissions(&domains, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&domains, 0o700).unwrap();
         let domain_file = domains.join("contacts.md");
         // Missing ## History
         std::fs::write(&domain_file, b"## Schema\n\n## State\n").unwrap();
-        std::fs::set_permissions(&domain_file, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&domain_file, 0o600).unwrap();
         let result = validate_markdown_format_commit(path);
         assert!(result.is_err(), "expected missing heading to be rejected");
         let msg = result.unwrap_err().to_string();
@@ -7818,19 +7813,19 @@ mod personal_memory_tests {
     #[test]
     fn markdown_commit_accepts_valid_directory() {
         use super::validate_markdown_format_commit;
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path();
-        std::fs::set_permissions(path, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(path, 0o700).unwrap();
         let manifest = path.join("manifest.md");
         std::fs::write(&manifest, b"# Memory\n").unwrap();
-        std::fs::set_permissions(&manifest, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&manifest, 0o600).unwrap();
         let domains = path.join("domains");
         std::fs::create_dir(&domains).unwrap();
-        std::fs::set_permissions(&domains, PermissionsExt::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&domains, 0o700).unwrap();
         let domain_file = domains.join("contacts.md");
         std::fs::write(&domain_file, b"## Schema\n\n## State\n\n## History\n").unwrap();
-        std::fs::set_permissions(&domain_file, PermissionsExt::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&domain_file, 0o600).unwrap();
         let result = validate_markdown_format_commit(path);
         assert!(
             result.is_ok(),

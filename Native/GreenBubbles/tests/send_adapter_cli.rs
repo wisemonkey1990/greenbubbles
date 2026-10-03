@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! End-to-end coverage of the `send` command group. The tests build a complete
 //! owner-only workspace — signed profile, signed matrix, immutable draft,
 //! local approval evidence — and prove that the command line stays fail-closed

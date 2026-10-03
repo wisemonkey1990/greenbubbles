@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -1169,7 +1169,7 @@ fn inspect_tables(path: &Path) -> Result<Vec<String>, RestoreError> {
 fn read_header_safely(path: &Path, source_id: &str) -> Result<[u8; 16], RestoreError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)
         .map_err(|_| RestoreError::Integrity(source_id.to_string()))?;
     let metadata = file
@@ -1187,7 +1187,7 @@ fn read_header_safely(path: &Path, source_id: &str) -> Result<[u8; 16], RestoreE
 fn read_first_page_safely(path: &Path, source_id: &str) -> Result<Vec<u8>, RestoreError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)
         .map_err(|_| RestoreError::Integrity(source_id.to_string()))?;
     let metadata = file
@@ -1215,7 +1215,7 @@ fn verify_snapshot_entry_with_progress(
     let path = entry.resolved_path(snapshot_dir)?;
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(&path)
         .map_err(|_| RestoreError::Integrity(entry.source.opaque_id.clone()))?;
     let metadata = file
@@ -1312,17 +1312,13 @@ fn elapsed_milliseconds(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-#[cfg(unix)]
 fn set_owner_only(path: &Path) -> Result<(), RestoreError> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(path, 0o700)?;
     Ok(())
 }
 
-#[cfg(unix)]
 fn set_owner_only_file(path: &Path) -> Result<(), RestoreError> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    crate::platform::set_mode(path, 0o600)?;
     Ok(())
 }
 
@@ -1330,7 +1326,6 @@ fn set_owner_only_file(path: &Path) -> Result<(), RestoreError> {
 mod tests {
     use super::*;
     use crate::manifest::{PathReference, SnapshotEntry, SourceFileFingerprint};
-    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn preflight_reports_every_storage_family_without_decryption() {
@@ -1369,7 +1364,7 @@ mod tests {
         fs::remove_file(&database).unwrap();
         let outside = directory.path().join("outside.db");
         fs::write(&outside, plaintext).unwrap();
-        std::os::unix::fs::symlink(outside, database).unwrap();
+        crate::platform::symlink(outside, database).unwrap();
 
         let error = preflight_snapshot(directory.path()).unwrap_err();
         assert!(matches!(error, RestoreError::Integrity(value) if value == "opaque-0"));
@@ -1394,7 +1389,7 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        fs::set_permissions(&key_file, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&key_file, 0o600).unwrap();
         let keys = DatabaseKeySet::load(&key_file).unwrap();
         let manifest = SnapshotManifest::load(directory.path()).unwrap();
         let entries = manifest.database_entries().collect::<Vec<_>>();

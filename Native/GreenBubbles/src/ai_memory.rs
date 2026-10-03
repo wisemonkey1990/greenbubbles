@@ -1,8 +1,8 @@
+use crate::platform::OpenOptionsExt;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 
@@ -397,7 +397,7 @@ impl<'a> MemoryProjector<'a> {
     ) -> Result<Self, RestoreError> {
         let documents = staging.join("documents");
         fs::create_dir(&documents)?;
-        fs::set_permissions(&documents, fs::Permissions::from_mode(0o700))?;
+        crate::platform::set_mode(&documents, 0o700)?;
         Ok(Self {
             staging,
             source,
@@ -744,7 +744,7 @@ impl<'a> MemoryProjector<'a> {
         let directory = self.staging.join(&relative_directory);
         if !directory.try_exists()? {
             fs::create_dir(&directory)?;
-            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+            crate::platform::set_mode(&directory, 0o700)?;
         }
         self.document_directories.insert(directory.clone());
         let relative_path = relative_directory.join(format!("{memory_id}.md"));
@@ -1291,7 +1291,7 @@ pub fn export_ai_memory_with_progress(
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-ai-memory-")
         .tempdir_in(output_parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
     progress.observe(
         ProgressState::Started,
         "projectAiMemory",
@@ -2636,7 +2636,7 @@ fn create_private_file(path: &Path) -> Result<File, RestoreError> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?)
 }
 

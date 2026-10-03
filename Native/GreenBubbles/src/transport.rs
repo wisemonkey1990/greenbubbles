@@ -1,6 +1,9 @@
+#![cfg_attr(not(unix), allow(unused_imports, dead_code))]
+
+use crate::platform::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -18,6 +21,39 @@ const CONNECTOR_RESPONSE_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECTOR_CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECTOR_CLIENT_READ_TIMEOUT: Duration = Duration::from_secs(300);
 
+#[cfg(not(unix))]
+fn unix_sockets_unsupported() -> RestoreError {
+    RestoreError::Integrity(
+        "the connector socket service needs Unix domain sockets and is not available on this platform"
+            .to_string(),
+    )
+}
+
+#[cfg(not(unix))]
+pub fn serve_unix(
+    _service: &impl ConnectorRequestHandler,
+    _socket_path: &Path,
+) -> Result<(), RestoreError> {
+    Err(unix_sockets_unsupported())
+}
+
+#[cfg(not(unix))]
+pub fn serve_unix_once(
+    _service: &impl ConnectorRequestHandler,
+    _socket_path: &Path,
+) -> Result<(), RestoreError> {
+    Err(unix_sockets_unsupported())
+}
+
+#[cfg(not(unix))]
+pub fn send_unix_request(
+    _socket_path: &Path,
+    _request: &ConnectorRequest,
+) -> Result<ConnectorResponse, RestoreError> {
+    Err(unix_sockets_unsupported())
+}
+
+#[cfg(unix)]
 pub fn serve_unix(
     service: &impl ConnectorRequestHandler,
     socket_path: &Path,
@@ -38,6 +74,7 @@ pub fn serve_unix(
     Ok(())
 }
 
+#[cfg(unix)]
 pub fn serve_unix_once(
     service: &impl ConnectorRequestHandler,
     socket_path: &Path,
@@ -47,6 +84,7 @@ pub fn serve_unix_once(
     handle_connection(service, &mut connection)
 }
 
+#[cfg(unix)]
 pub fn send_unix_request(
     socket_path: &Path,
     request: &ConnectorRequest,
@@ -92,7 +130,7 @@ pub fn send_unix_request(
 pub fn load_connector_request(path: &Path) -> Result<ConnectorRequest, RestoreError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     let identity = PrivateRequestIdentity::from_metadata(&before)?;
@@ -135,7 +173,7 @@ struct PrivateRequestIdentity {
 impl PrivateRequestIdentity {
     fn from_metadata(metadata: &fs::Metadata) -> Result<Self, RestoreError> {
         if !metadata.is_file()
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != crate::platform::geteuid()
             || metadata.nlink() != 1
             || metadata.permissions().mode() & 0o077 != 0
         {
@@ -155,6 +193,7 @@ impl PrivateRequestIdentity {
     }
 }
 
+#[cfg(unix)]
 fn bind_private_socket(path: &Path) -> Result<(UnixListener, SocketLease), RestoreError> {
     let parent = path
         .parent()
@@ -167,16 +206,17 @@ fn bind_private_socket(path: &Path) -> Result<(UnixListener, SocketLease), Resto
     }
     let listener = UnixListener::bind(path)?;
     let lease = SocketLease::capture(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    crate::platform::set_mode(path, 0o600)?;
     validate_socket(path)?;
     Ok((listener, lease))
 }
 
+#[cfg(unix)]
 fn validate_socket(path: &Path) -> Result<(), RestoreError> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
         || !metadata.file_type().is_socket()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
         || metadata.permissions().mode() & 0o077 != 0
     {
@@ -187,6 +227,7 @@ fn validate_socket(path: &Path) -> Result<(), RestoreError> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn handle_connection(
     service: &impl ConnectorRequestHandler,
     connection: &mut UnixStream,
@@ -216,6 +257,7 @@ fn handle_connection(
     Ok(())
 }
 
+#[cfg(unix)]
 fn invalid_transport_response(request_id: &str, message: &str) -> ConnectorResponse {
     ConnectorResponse {
         api_version: CONNECTOR_API_VERSION.to_string(),
@@ -230,12 +272,14 @@ fn invalid_transport_response(request_id: &str, message: &str) -> ConnectorRespo
     }
 }
 
+#[cfg(unix)]
 struct SocketLease {
     path: PathBuf,
     device: u64,
     inode: u64,
 }
 
+#[cfg(unix)]
 impl SocketLease {
     fn capture(path: &Path) -> Result<Self, RestoreError> {
         let metadata = fs::symlink_metadata(path)?;
@@ -252,6 +296,7 @@ impl SocketLease {
     }
 }
 
+#[cfg(unix)]
 impl Drop for SocketLease {
     fn drop(&mut self) {
         let Ok(metadata) = fs::symlink_metadata(&self.path) else {
@@ -266,11 +311,11 @@ impl Drop for SocketLease {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
+    use crate::platform::OpenOptionsExt;
     use std::fs::OpenOptions;
     use std::io::{Read, Write};
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     use std::os::unix::net::UnixStream;
 
     use tempfile::tempdir;
@@ -283,13 +328,13 @@ mod tests {
     #[test]
     fn socket_lease_removes_only_the_socket_it_created() {
         let fixture = tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let socket = fixture.path().join("connector.sock");
         let (listener, lease) = bind_private_socket(&socket).unwrap();
         drop(listener);
         fs::remove_file(&socket).unwrap();
         fs::write(&socket, b"replacement").unwrap();
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&socket, 0o600).unwrap();
 
         drop(lease);
 
@@ -299,7 +344,7 @@ mod tests {
     #[test]
     fn connector_request_is_read_from_one_private_descriptor() {
         let fixture = tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let path = fixture.path().join("request.json");
         let request = ConnectorRequest {
             api_version: CONNECTOR_API_VERSION.to_string(),
@@ -331,7 +376,7 @@ mod tests {
     #[test]
     fn client_rejects_a_response_for_a_different_request() {
         let fixture = tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let socket = fixture.path().join("connector.sock");
         let (listener, lease) = bind_private_socket(&socket).unwrap();
         let server = std::thread::spawn(move || {

@@ -18,11 +18,10 @@
 //! durable with a write-to-temporary, `fsync`, `rename`, `fsync`-directory
 //! sequence, so a torn write can never be observed.
 
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -614,10 +613,7 @@ impl SendOutbox {
         }
         if !directory.try_exists()? {
             fs::create_dir_all(directory)?;
-            fs::set_permissions(
-                directory,
-                std::os::unix::fs::PermissionsExt::from_mode(0o700),
-            )?;
+            crate::platform::set_mode(directory, 0o700)?;
         }
         ensure_private_directory(directory)?;
         let outbox = Self {
@@ -644,10 +640,7 @@ impl SendOutbox {
         now_unix_nanoseconds: u128,
     ) -> Result<T, RestoreError> {
         let lock = self.lock_file()?;
-        let descriptor = lock.as_raw_fd();
-        if unsafe { libc::flock(descriptor, libc::LOCK_EX) } != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        lock.lock()?;
         let result = (|| -> Result<T, RestoreError> {
             let (mut state, already_materialized) = self.read_state(now_unix_nanoseconds)?;
             let before = state.clone();
@@ -658,11 +651,9 @@ impl SendOutbox {
             }
             Ok(value)
         })();
-        let unlock = unsafe { libc::flock(descriptor, libc::LOCK_UN) };
+        let unlock = lock.unlock();
         let value = result?;
-        if unlock != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        unlock?;
         Ok(value)
     }
 
@@ -674,13 +665,13 @@ impl SendOutbox {
             .create(true)
             .truncate(false)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(&path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file()
             || metadata.permissions().mode() & 0o077 != 0
             || metadata.nlink() != 1
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != crate::platform::geteuid()
         {
             return Err(RestoreError::Integrity(
                 "send outbox lock must be an owner-only regular file with one link".to_string(),
@@ -707,7 +698,7 @@ impl SendOutbox {
             || !metadata.is_file()
             || metadata.permissions().mode() & 0o077 != 0
             || metadata.nlink() != 1
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != crate::platform::geteuid()
             || metadata.len() > MAXIMUM_OUTBOX_BYTES
         {
             return Err(RestoreError::Integrity(
@@ -730,7 +721,7 @@ impl SendOutbox {
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(&temporary)?;
         let bytes = serde_json::to_vec_pretty(state)?;
         if bytes.len() as u64 > MAXIMUM_OUTBOX_BYTES {
@@ -752,7 +743,7 @@ impl SendOutbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use crate::platform::PermissionsExt;
     use tempfile::TempDir;
 
     fn sha(byte: char) -> String {
@@ -791,7 +782,7 @@ mod tests {
 
     fn private_directory() -> TempDir {
         let directory = TempDir::new().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         directory
     }
 

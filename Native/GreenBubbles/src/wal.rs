@@ -1,6 +1,6 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -232,7 +232,7 @@ fn open_regular_file(path: &Path, writable: bool) -> Result<File, DecryptError> 
     options
         .read(true)
         .write(writable)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW);
     let file = options.open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.nlink() != 1 {

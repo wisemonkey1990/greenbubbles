@@ -1,7 +1,7 @@
+use crate::platform::OpenOptionsExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -516,7 +516,7 @@ pub fn query_ai_context(
     let drafts = tempfile::Builder::new()
         .prefix(".greenbubbles-ai-query-")
         .tempdir_in(audit_parent)?;
-    fs::set_permissions(drafts.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(drafts.path(), 0o700)?;
     let service =
         ConnectorService::open(replica_path, key, policy_path, audit_path, drafts.path())?;
     let before = replica_status(replica_path, key)?;
@@ -591,11 +591,11 @@ pub fn export_ai_context(
     let scratch_drafts = tempfile::Builder::new()
         .prefix(".greenbubbles-ai-export-requests-")
         .tempdir_in(audit_parent)?;
-    fs::set_permissions(scratch_drafts.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(scratch_drafts.path(), 0o700)?;
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-ai-context-")
         .tempdir_in(output_parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
     let service = ConnectorService::open(
         replica_path,
         key,
@@ -2469,7 +2469,7 @@ impl NdjsonWriter {
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(crate::platform::O_NOFOLLOW | crate::platform::O_CLOEXEC)
             .open(path)?;
         Ok(Self {
             role: role.to_string(),
@@ -2509,7 +2509,7 @@ fn write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Restor
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(crate::platform::O_NOFOLLOW | crate::platform::O_CLOEXEC)
         .open(path)?;
     let mut writer = BufWriter::new(file);
     serde_json::to_writer_pretty(&mut writer, value)?;

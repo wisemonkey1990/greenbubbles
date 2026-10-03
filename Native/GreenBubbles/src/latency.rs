@@ -1,6 +1,6 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -575,7 +575,7 @@ fn read_private_json<T: serde::de::DeserializeOwned>(
     }
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     let mut bytes = Vec::with_capacity(before.len() as usize);
@@ -602,8 +602,8 @@ fn read_private_json<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::OpenOptionsExt;
     use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     use std::path::PathBuf;
 
     #[test]
@@ -710,10 +710,10 @@ mod tests {
         let fixture = private_fixture();
         let report = fixture.join("report.json");
         write_private_json(&report, &snapshot_json());
-        fs::set_permissions(&report, fs::Permissions::from_mode(0o644)).unwrap();
+        crate::platform::set_mode(&report, 0o644).unwrap();
         assert!(read_private_json::<serde_json::Value>(&report, MAX_PRIVATE_REPORT_BYTES).is_err());
         fs::remove_file(&report).unwrap();
-        std::os::unix::fs::symlink("missing", &report).unwrap();
+        crate::platform::symlink("missing", &report).unwrap();
         assert!(read_private_json::<serde_json::Value>(&report, MAX_PRIVATE_REPORT_BYTES).is_err());
     }
 
@@ -763,7 +763,7 @@ mod tests {
 
     fn private_fixture() -> PathBuf {
         let path = tempfile::tempdir().unwrap().keep();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&path, 0o700).unwrap();
         path
     }
 

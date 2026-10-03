@@ -186,8 +186,8 @@ fn integrity(message: impl Into<String>) -> RestoreError {
 
 #[cfg(test)]
 mod tests {
+
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
     use sha2::{Digest, Sha256};
@@ -317,14 +317,14 @@ mod tests {
         if !directory.exists() {
             fs::create_dir(directory).unwrap();
         }
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory, 0o700).unwrap();
         let relative_path = "sets/0000/database.db";
         let database_path = directory.join(relative_path);
         fs::create_dir_all(database_path.parent().unwrap()).unwrap();
         let mut bytes = b"SQLite format 3\0".to_vec();
         bytes.extend_from_slice(marker);
         fs::write(&database_path, &bytes).unwrap();
-        fs::set_permissions(&database_path, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&database_path, 0o600).unwrap();
         let fingerprint = SourceFileFingerprint {
             device_id: 1,
             file_id: 1,
@@ -388,10 +388,6 @@ mod tests {
             serde_json::to_vec_pretty(&manifest).unwrap(),
         )
         .unwrap();
-        fs::set_permissions(
-            directory.join("manifest.json"),
-            fs::Permissions::from_mode(0o600),
-        )
-        .unwrap();
+        crate::platform::set_mode(directory.join("manifest.json"), 0o600).unwrap();
     }
 }

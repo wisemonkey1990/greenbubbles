@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -164,12 +164,12 @@ pub fn profile_archive_schema_with_progress(
     let coverage_path = archive.join("coverage.json");
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(crate::platform::O_NOFOLLOW | crate::platform::O_CLOEXEC)
         .open(&coverage_path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file()
         || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.mode() & 0o077 != 0
         || metadata.len() == 0
         || metadata.len() > MAX_DIAGNOSTIC_COVERAGE_BYTES
@@ -370,7 +370,7 @@ pub fn profile_archive_payloads_with_progress(
     let messages = archive.join("messages.ndjson");
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(crate::platform::O_NOFOLLOW | crate::platform::O_CLOEXEC)
         .open(&messages)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.mode() & 0o077 != 0 {

@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Take};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 use serde_json::Value;
@@ -65,13 +65,13 @@ impl DatabaseKeySet {
     pub fn load(path: &Path) -> Result<Self, RestoreError> {
         let mut file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(path)
             .map_err(|_| invalid("unable to open the exported-key file safely"))?;
         let before = file
             .metadata()
             .map_err(|_| invalid("unable to inspect the exported-key file"))?;
-        if !before.is_file() || before.nlink() != 1 || before.uid() != unsafe { libc::geteuid() } {
+        if !before.is_file() || before.nlink() != 1 || before.uid() != crate::platform::geteuid() {
             return Err(invalid(
                 "the exported-key input must be one current-user-owned regular file",
             ));
@@ -302,8 +302,8 @@ fn invalid(reason: &str) -> RestoreError {
 
 #[cfg(test)]
 mod tests {
+
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
 
@@ -372,12 +372,12 @@ mod tests {
                 "message.db": {"enc_key": "11".repeat(32), "salt": "22".repeat(16)}
             }),
         );
-        fs::set_permissions(&public, fs::Permissions::from_mode(0o644)).unwrap();
+        crate::platform::set_mode(&public, 0o644).unwrap();
         assert!(DatabaseKeySet::load(&public).is_err());
     }
 
     fn write_private(path: &Path, value: Value) {
         fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(path, 0o600).unwrap();
     }
 }

@@ -18,9 +18,9 @@
 //! reviewed is refused rather than guessed at, which is what keeps executables,
 //! bundles, and media the adapter has no gate for out of the send path.
 
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -241,7 +241,7 @@ pub fn stage_attachment(
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(&staged_path)?;
         let mut hasher = Sha256::new();
         let mut buffer = vec![0_u8; STAGING_CHUNK_BYTES];
@@ -308,7 +308,7 @@ pub fn discard_staging_directory(staging_directory: &Path, staging_root: &Path) 
     };
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
     {
         return;
     }
@@ -329,7 +329,7 @@ fn open_source(source: &Path) -> Result<File, RestoreError> {
     let metadata = fs::symlink_metadata(source)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.permissions().mode() & 0o022 != 0
     {
         return Err(RestoreError::Integrity(
@@ -339,7 +339,7 @@ fn open_source(source: &Path) -> Result<File, RestoreError> {
     }
     Ok(OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(source)?)
 }
 
@@ -347,7 +347,7 @@ fn open_source(source: &Path) -> Result<File, RestoreError> {
 fn create_staging_directory(staging_root: &Path) -> Result<PathBuf, RestoreError> {
     if !staging_root.try_exists()? {
         fs::create_dir_all(staging_root)?;
-        fs::set_permissions(staging_root, fs::Permissions::from_mode(0o700))?;
+        crate::platform::set_mode(staging_root, 0o700)?;
     }
     ensure_private_directory(staging_root)?;
     let mut name = [0_u8; 16];
@@ -356,7 +356,7 @@ fn create_staging_directory(staging_root: &Path) -> Result<PathBuf, RestoreError
     let directory = staging_root.join(hex::encode(name));
     // `create_dir` fails if the path exists, so the directory is provably new.
     fs::create_dir(&directory)?;
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(&directory, 0o700)?;
     Ok(directory)
 }
 
@@ -367,7 +367,7 @@ fn reread_and_digest(
 ) -> Result<(String, u64), RestoreError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(staged_path)?;
     let metadata = file.metadata()?;
     if metadata.dev() != written.dev()
@@ -409,14 +409,14 @@ mod tests {
 
     fn private_directory() -> TempDir {
         let directory = TempDir::new().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         directory
     }
 
     fn source(directory: &Path, name: &str, contents: &[u8]) -> PathBuf {
         let path = directory.join(name);
         fs::write(&path, contents).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&path, 0o600).unwrap();
         path
     }
 
@@ -557,7 +557,7 @@ mod tests {
         let contents = b"payload".to_vec();
         let real = source(root.path(), "real.txt", &contents);
         let link = root.path().join("link.txt");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
+        crate::platform::symlink(&real, &link).unwrap();
         assert!(stage_attachment(
             &link,
             &staging,
@@ -566,7 +566,7 @@ mod tests {
         )
         .is_err());
         let loose = source(root.path(), "loose.txt", &contents);
-        fs::set_permissions(&loose, fs::Permissions::from_mode(0o666)).unwrap();
+        crate::platform::set_mode(&loose, 0o666).unwrap();
         assert!(stage_attachment(
             &loose,
             &staging,
@@ -581,7 +581,7 @@ mod tests {
         let root = private_directory();
         let staging = root.path().join("staging");
         fs::create_dir_all(&staging).unwrap();
-        fs::set_permissions(&staging, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&staging, 0o700).unwrap();
         let elsewhere = root.path().join("precious");
         fs::create_dir(&elsewhere).unwrap();
         fs::write(elsewhere.join("keep.txt"), b"keep").unwrap();

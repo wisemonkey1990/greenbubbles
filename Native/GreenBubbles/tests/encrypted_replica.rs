@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};

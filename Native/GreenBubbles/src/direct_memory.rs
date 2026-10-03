@@ -1,8 +1,8 @@
+use crate::platform::OpenOptionsExt;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1182,7 +1182,7 @@ fn publish_memory_output(
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-direct-memory-")
         .tempdir_in(parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
 
     let mut files = Vec::new();
     let mut model_input = compact_input_bytes.to_vec();
@@ -1424,7 +1424,7 @@ fn write_private_bytes(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(crate::platform::O_NOFOLLOW | crate::platform::O_CLOEXEC)
         .open(&path)?;
     file.write_all(bytes)?;
     file.sync_all()?;

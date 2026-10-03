@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
@@ -1138,7 +1138,7 @@ impl AttachmentSource {
             .map_err(|_| LiveAttachmentError::UnsafeSource("account root is unavailable".into()))?;
         if metadata.file_type().is_symlink()
             || !metadata.is_dir()
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != crate::platform::geteuid()
         {
             return Err(LiveAttachmentError::UnsafeSource(
                 "account root must be a current-user-owned real directory".into(),
@@ -1269,7 +1269,7 @@ fn inspect_file_candidate(
     let metadata = fs::symlink_metadata(&path)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.len() == 0
         || metadata.len() > kind.maximum_source_bytes()
     {
@@ -1285,7 +1285,7 @@ fn inspect_file_candidate(
     }
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(&path)?;
     let mut prefix = [0u8; 32];
     let count = file.read(&mut prefix)?;
@@ -1323,7 +1323,7 @@ fn read_file_candidate(candidate: &Candidate) -> Result<Vec<u8>, LiveAttachmentE
     };
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     if !version.matches(&before) {
@@ -1357,7 +1357,7 @@ fn publish_file_candidate(
     let (parent, final_output) = validate_new_output(protected_root, output)?;
     let mut source = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = source.metadata()?;
     if !version.matches(&before) || before.len() > maximum_bytes {
@@ -1460,7 +1460,7 @@ fn validate_owned_real_directory(
         .map_err(|_| LiveAttachmentError::UnsafeSource(format!("{description} is unavailable")))?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
     {
         return Err(LiveAttachmentError::UnsafeSource(format!(
             "{description} must be a current-user-owned real directory"
@@ -1494,7 +1494,7 @@ fn validate_owner_only_directory(
         .map_err(|_| LiveAttachmentError::Output(format!("{description} is unavailable")))?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.mode() & SQLITE_OWNER_MASK != 0
     {
         return Err(LiveAttachmentError::Output(format!(
@@ -1964,25 +1964,19 @@ fn readable_image_file(account_root: &Path, source: &Path, md5: &str) -> Option<
     }
     let output = cache.join(format!("{md5}.{extension}"));
     fs::write(&output, &decoded.data).ok()?;
-    let mut permissions = fs::metadata(&output).ok()?.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(&output, permissions).ok()?;
+    crate::platform::set_mode(&output, 0o600).ok()?;
     Some(output)
 }
 
 fn media_cache_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let directory = PathBuf::from(home).join(".greenbubbles/cache/media");
+    let directory = crate::platform::home_dir()?.join(".greenbubbles/cache/media");
     fs::create_dir_all(&directory).ok()?;
-    let mut permissions = fs::metadata(&directory).ok()?.permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&directory, permissions).ok()?;
+    crate::platform::set_mode(&directory, 0o700).ok()?;
     Some(directory)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use rusqlite::{params, Connection};
 
@@ -1992,7 +1986,7 @@ mod tests {
     #[test]
     fn inspects_and_materializes_one_xor_image_without_releasing_source_path() {
         let fixture = tempfile::tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let account = fixture.path().join("account");
         let conversation = "wxid_friend";
         let md5 = "0123456789abcdef0123456789abcdef";
@@ -2175,7 +2169,7 @@ mod tests {
 
     fn message_attachment_fixture() -> MessageAttachmentFixture {
         let directory = tempfile::tempdir().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         let account = directory.path().join("account");
         let database_root = account.join("db_storage");
         let output = directory.path().join("output");
@@ -2188,7 +2182,7 @@ mod tests {
             output.clone(),
         ] {
             fs::create_dir_all(&path).unwrap();
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+            crate::platform::set_mode(path, 0o700).unwrap();
         }
         let conversation = "wxid_media_friend".to_string();
         Connection::open(database_root.join("contact/contact.db"))
