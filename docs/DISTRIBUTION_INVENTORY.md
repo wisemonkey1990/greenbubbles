@@ -147,8 +147,12 @@ bundled-SQLCipher build features.
   domain.
 - The macOS build uses a system crypto provider for the selected
   `bundled-sqlcipher` feature; it does not select the separately named vendored
-  OpenSSL feature. Binary linkage and platform-notice requirements must be
-  rechecked on every intended release target.
+  OpenSSL feature. The experimental Windows build (see
+  [Windows port](WINDOWS_PORT.md)) does select
+  `bundled-sqlcipher-vendored-openssl`, because Windows has no system crypto
+  provider for SQLCipher. No Windows binary is distributed, and the notice
+  bundle covers only the macOS target. Binary linkage and platform-notice
+  requirements must be rechecked on every intended release target.
 
 ### SILK audio decoder
 

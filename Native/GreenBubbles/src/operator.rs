@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -172,7 +171,7 @@ pub fn restore_snapshot_and_publish_with_progress(
             let staging = tempfile::Builder::new()
                 .prefix(".greenbubbles-offline-publish-")
                 .tempdir_in(output_parent)?;
-            fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+            crate::platform::set_mode(staging.path(), 0o700)?;
             let fragment = staging.path().join("incremental-fragment");
             let fragment_report = restore_catalog_with_progress(
                 &catalog,
@@ -204,7 +203,7 @@ pub fn restore_snapshot_and_publish_with_progress(
             let staging = tempfile::Builder::new()
                 .prefix(".greenbubbles-offline-publish-")
                 .tempdir_in(output_parent)?;
-            fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+            crate::platform::set_mode(staging.path(), 0o700)?;
             let replacement = staging.path().join("integrity-scan-restoration");
             let replacement_report = restore_catalog_with_progress(
                 &catalog,

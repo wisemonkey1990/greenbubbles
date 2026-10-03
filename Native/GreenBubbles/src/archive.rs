@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
@@ -272,7 +272,7 @@ pub(crate) fn ensure_private_directory(path: &Path) -> Result<(), RestoreError> 
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.permissions().mode() & 0o077 != 0
     {
         return Err(RestoreError::Integrity(
@@ -287,7 +287,7 @@ pub(crate) fn ensure_private_regular_file(path: &Path) -> Result<(), RestoreErro
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.permissions().mode() & 0o077 != 0
         || metadata.nlink() != 1
     {

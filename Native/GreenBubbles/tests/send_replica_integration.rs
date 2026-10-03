@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Exercises the send adapter's replica-backed paths against a real
 //! bootstrapped replica rather than a hand-built fixture.
 //!

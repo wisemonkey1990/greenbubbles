@@ -216,6 +216,19 @@
       },
       {
         "features" : [
+          "bundled-sqlcipher-vendored-openssl"
+        ],
+        "kind" : "normal",
+        "licenseMetadata" : "MIT",
+        "name" : "rusqlite",
+        "optional" : false,
+        "requirement" : "^0.40",
+        "resolvedVersion" : "0.40.2",
+        "source" : "registry+https://github.com/rust-lang/crates.io-index",
+        "usesDefaultFeatures" : true
+      },
+      {
+        "features" : [
           "derive"
         ],
         "kind" : "normal",
@@ -320,6 +333,21 @@
       },
       {
         "features" : [
+          "Win32_Foundation",
+          "Win32_Storage_FileSystem",
+          "Win32_System_Threading"
+        ],
+        "kind" : "normal",
+        "licenseMetadata" : "MIT OR Apache-2.0",
+        "name" : "windows-sys",
+        "optional" : false,
+        "requirement" : "^0.61",
+        "resolvedVersion" : "0.61.2",
+        "source" : "registry+https://github.com/rust-lang/crates.io-index",
+        "usesDefaultFeatures" : true
+      },
+      {
+        "features" : [
 
         ],
         "kind" : "normal",
@@ -351,6 +379,19 @@
         "kind" : "normal",
         "licenseMetadata" : null,
         "name" : "wx-decrypt",
+        "optional" : false,
+        "requirement" : "*",
+        "resolvedVersion" : "0.7.4",
+        "source" : "git+https://github.com/pandorafuture/wx-cli?rev=2abe708f55bfe135539a385df856fdc58f97fc74",
+        "usesDefaultFeatures" : true
+      },
+      {
+        "features" : [
+
+        ],
+        "kind" : "normal",
+        "licenseMetadata" : null,
+        "name" : "wx-media",
         "optional" : false,
         "requirement" : "*",
         "resolvedVersion" : "0.7.4",

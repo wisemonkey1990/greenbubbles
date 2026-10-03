@@ -37,8 +37,18 @@ zstd = "0.13"
 wx-db = { git = "https://github.com/pandorafuture/wx-cli", rev = "2abe708f55bfe135539a385df856fdc58f97fc74" }
 wx-context = { git = "https://github.com/pandorafuture/wx-cli", rev = "2abe708f55bfe135539a385df856fdc58f97fc74" }
 wx-decrypt = { git = "https://github.com/pandorafuture/wx-cli", rev = "2abe708f55bfe135539a385df856fdc58f97fc74" }
-wx-media = { git = "https://github.com/pandorafuture/wx-cli", rev = "2abe708f55bfe135539a385df856fdc58f97fc74", features = ["audio"] }
+wx-media = { git = "https://github.com/pandorafuture/wx-cli", rev = "2abe708f55bfe135539a385df856fdc58f97fc74" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
+
+# SILK voice transcoding builds C code through bindgen 0.59, which fails on
+# current Windows headers. Without the feature voice notes stay lossless SILK.
+[target.'cfg(not(windows))'.dependencies]
+wx-media = { git = "https://github.com/pandorafuture/wx-cli", rev = "2abe708f55bfe135539a385df856fdc58f97fc74", features = ["audio"] }
+
+# Windows has no system OpenSSL for SQLCipher to link, so build one in.
+[target.'cfg(windows)'.dependencies]
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [dev-dependencies]
 filetime = "0.2"

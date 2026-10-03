@@ -10,10 +10,10 @@
 //! evidence, never a verdict: `observedSent` is created only by replica
 //! reconciliation, exactly as `ACTION_SAFETY_CONTRACT.md` requires.
 
+use crate::platform::{MetadataExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -573,7 +573,7 @@ impl ProcessSendDispatcher {
             || !metadata.is_file()
             || metadata.permissions().mode() & 0o022 != 0
             || metadata.permissions().mode() & 0o111 == 0
-            || (metadata.uid() != unsafe { libc::geteuid() } && metadata.uid() != 0)
+            || (metadata.uid() != crate::platform::geteuid() && metadata.uid() != 0)
         {
             return Err(RestoreError::Integrity(
                 "send dispatcher must be an executable, non-symlink regular file that only its owner can write"
@@ -605,7 +605,7 @@ impl ProcessSendDispatcher {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|_| SendFailureCode::EngineUnavailable)?;
-        let pid = child.id() as libc::pid_t;
+        let pid = child.id();
         if let Some(mut stdin) = child.stdin.take() {
             // A failed write is reported by the child's exit status; the read
             // side below turns it into `engineUnavailable`.
@@ -635,7 +635,7 @@ impl ProcessSendDispatcher {
             Err(_) => {
                 // The watchdog fires: abandon the call, kill the child, and
                 // never wait on it again.
-                unsafe { libc::kill(pid, libc::SIGKILL) };
+                crate::platform::terminate_process(pid);
                 Err(SendFailureCode::EngineStall)
             }
         }
@@ -2102,8 +2102,8 @@ pub fn unix_nanoseconds() -> Result<u128, RestoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::cell::RefCell;
-    use std::os::unix::fs::PermissionsExt;
 
     use tempfile::TempDir;
 
@@ -2326,12 +2326,12 @@ mod tests {
 
     fn fixture(stage: SendRolloutStage, kill_switch: bool) -> Fixture {
         let root = TempDir::new().unwrap();
-        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(root.path(), 0o700).unwrap();
         let outbox = root.path().join("outbox");
         let audit_path = root.path().join("audit.ndjson");
         let dispatcher_path = root.path().join("dispatcher");
         fs::write(&dispatcher_path, b"#!/bin/sh\nexit 1\n").unwrap();
-        fs::set_permissions(&dispatcher_path, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&dispatcher_path, 0o700).unwrap();
         let conversations = match stage {
             SendRolloutStage::DryRun | SendRolloutStage::SelfSend => {
                 BTreeSet::from([CONVERSATION.to_string()])
@@ -3153,7 +3153,7 @@ mod tests {
         let contents = b"an approved attachment payload".repeat(8);
         let source = fixture._root.path().join(name);
         fs::write(&source, &contents).unwrap();
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&source, 0o600).unwrap();
         let mut draft = draft(now);
         draft.rendered_text = String::new();
         draft.rendered_text_sha256 = hex::encode(Sha256::digest(b""));

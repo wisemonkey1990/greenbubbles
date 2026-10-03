@@ -1,8 +1,8 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -206,7 +206,7 @@ impl QueryProfileStore {
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
-                .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+                .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
                 .open(&candidate)
             {
                 Ok(file) => {
@@ -225,7 +225,7 @@ impl QueryProfileStore {
             let mut file = temporary_file.expect("temporary file accompanies its path");
             file.write_all(&bytes)?;
             file.sync_all()?;
-            fs::set_permissions(&temporary_path, fs::Permissions::from_mode(0o600))?;
+            crate::platform::set_mode(&temporary_path, 0o600)?;
             fs::rename(&temporary_path, &final_path)?;
             File::open(parent)?.sync_all()?;
             let round_trip = Self::load(&final_path)?;
@@ -290,6 +290,9 @@ pub fn discover_default_live_source_root() -> Result<PathBuf, QueryProfileError>
     let mut candidates = Vec::new();
     candidates
         .push(home.join("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files"));
+    // The Windows client keeps accounts under Documents unless the user moved
+    // them, in which case `source.root` names the new location.
+    candidates.push(home.join("Documents/xwechat_files"));
     let groups = home.join("Library/Group Containers");
     if let Ok(entries) = fs::read_dir(&groups) {
         for entry in entries.flatten() {
@@ -335,14 +338,13 @@ pub fn discover_default_live_source_root() -> Result<PathBuf, QueryProfileError>
 }
 
 fn current_user_home() -> Result<PathBuf, QueryProfileError> {
-    let home = env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| QueryProfileError::Unavailable("HOME is not set".into()))?;
+    let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = crate::platform::home_dir()
+        .ok_or_else(|| QueryProfileError::Unavailable(format!("{variable} is not set")))?;
     if !home.is_absolute() {
-        return Err(QueryProfileError::UnsafePath(
-            "HOME must be an absolute path".into(),
-        ));
+        return Err(QueryProfileError::UnsafePath(format!(
+            "{variable} must be an absolute path"
+        )));
     }
     Ok(home)
 }
@@ -353,7 +355,7 @@ fn is_usable_live_database_root(path: &Path) -> bool {
     };
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
     {
         return false;
     }
@@ -588,7 +590,7 @@ fn read_private_file(
     validate_private_file_metadata(&path, maximum_bytes, description)?;
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(&path)?;
     let metadata = file.metadata()?;
     validate_open_file_metadata(&metadata, maximum_bytes, description)?;
@@ -616,7 +618,7 @@ fn resolve_private_file_path(path: &Path, description: &str) -> Result<PathBuf, 
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.mode() & 0o077 != 0
     {
         return Err(QueryProfileError::UnsafePath(format!(
@@ -651,7 +653,7 @@ fn validate_open_file_metadata(
     description: &str,
 ) -> Result<(), QueryProfileError> {
     if !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
         || metadata.mode() & 0o077 != 0
     {
@@ -762,18 +764,18 @@ mod tests {
     #[test]
     fn private_key_reader_rejects_permissions_and_symlinks() {
         let directory = tempfile::tempdir().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         let key = directory.path().join("key");
         fs::write(&key, format!("{}\n", hex::encode([0xAB_u8; 32]))).unwrap();
-        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&key, 0o600).unwrap();
         assert_eq!(*read_private_32_byte_credential(&key).unwrap(), [0xAB; 32]);
 
-        fs::set_permissions(&key, fs::Permissions::from_mode(0o640)).unwrap();
+        crate::platform::set_mode(&key, 0o640).unwrap();
         assert!(read_private_32_byte_credential(&key).is_err());
-        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&key, 0o600).unwrap();
 
         let link = directory.path().join("key-link");
-        std::os::unix::fs::symlink(&key, &link).unwrap();
+        crate::platform::symlink(&key, &link).unwrap();
         assert!(read_private_32_byte_credential(&link).is_err());
     }
 
@@ -814,7 +816,7 @@ mod tests {
     #[test]
     fn live_discovery_selects_the_newest_complete_database_root() {
         let home = tempfile::tempdir().unwrap();
-        fs::set_permissions(home.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(home.path(), 0o700).unwrap();
         let files = home
             .path()
             .join("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files");
@@ -863,7 +865,7 @@ mod tests {
     #[test]
     fn configuration_reader_requires_private_real_files() {
         let directory = tempfile::tempdir().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         let configuration = directory.path().join("query-profiles.json");
         let store = QueryProfileStore {
             schema: QUERY_PROFILE_SCHEMA.into(),
@@ -878,15 +880,15 @@ mod tests {
             )]),
         };
         fs::write(&configuration, serde_json::to_vec(&store).unwrap()).unwrap();
-        fs::set_permissions(&configuration, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&configuration, 0o600).unwrap();
         assert_eq!(QueryProfileStore::load(&configuration).unwrap(), store);
 
-        fs::set_permissions(&configuration, fs::Permissions::from_mode(0o644)).unwrap();
+        crate::platform::set_mode(&configuration, 0o644).unwrap();
         assert!(QueryProfileStore::load(&configuration).is_err());
-        fs::set_permissions(&configuration, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(&configuration, 0o600).unwrap();
 
         let link = directory.path().join("query-profiles-link.json");
-        std::os::unix::fs::symlink(&configuration, &link).unwrap();
+        crate::platform::symlink(&configuration, &link).unwrap();
         assert!(QueryProfileStore::load(&link).is_err());
     }
 }

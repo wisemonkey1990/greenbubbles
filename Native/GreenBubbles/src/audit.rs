@@ -1,8 +1,8 @@
+use crate::platform::OsStrExt;
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -1741,7 +1741,7 @@ fn verified_file(
     }
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     if !before.is_file()
@@ -2876,7 +2876,7 @@ fn open_private_readonly(path: &Path) -> Result<File, RestoreError> {
     ensure_private_regular_file(path)?;
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {

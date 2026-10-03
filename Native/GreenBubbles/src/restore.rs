@@ -1,10 +1,8 @@
+use crate::platform::OsStrExt;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::mem::MaybeUninit;
 use std::ops::Deref;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -85,8 +83,8 @@ impl RestorationStaging {
         create_owner_only_directory(directory.path())?;
         let path = directory.path().join("messages.sqlite");
         let connection = Connection::open(&path)?;
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+
+        crate::platform::set_mode(&path, 0o600)?;
         connection.execute_batch(
             "PRAGMA journal_mode = OFF;
              PRAGMA synchronous = OFF;
@@ -1784,20 +1782,13 @@ fn attach_finalization_storage(
 
 pub(crate) fn available_free_bytes(path: &Path) -> Result<u64, RestoreError> {
     let probe_path = nearest_existing_ancestor(path)?;
-    let path_bytes = probe_path.as_os_str().as_bytes();
-    let c_path = CString::new(path_bytes).map_err(|_| {
-        RestoreError::Integrity("restoration output path contains a NUL byte".to_string())
-    })?;
-    let mut statistics = MaybeUninit::<libc::statvfs>::uninit();
-    // SAFETY: `c_path` is NUL-terminated and `statistics` points to writable,
-    // correctly aligned storage that is read only after statvfs succeeds.
-    if unsafe { libc::statvfs(c_path.as_ptr(), statistics.as_mut_ptr()) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    // SAFETY: the successful statvfs call initialized the complete structure.
-    let statistics = unsafe { statistics.assume_init() };
-    let bytes = u128::from(statistics.f_bavail).saturating_mul(u128::from(statistics.f_frsize));
-    Ok(u64::try_from(bytes).unwrap_or(u64::MAX))
+    crate::platform::available_space(&probe_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidInput {
+            RestoreError::Integrity("restoration output path contains a NUL byte".to_string())
+        } else {
+            error.into()
+        }
+    })
 }
 
 fn nearest_existing_ancestor(path: &Path) -> Result<PathBuf, RestoreError> {
@@ -3302,7 +3293,7 @@ pub(crate) fn scoped_opaque_id(scope: &str, value: &[u8]) -> String {
 }
 
 fn owner_only_writer(path: &Path) -> Result<BufWriter<File>, RestoreError> {
-    use std::os::unix::fs::OpenOptionsExt;
+    use crate::platform::OpenOptionsExt;
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -3312,9 +3303,8 @@ fn owner_only_writer(path: &Path) -> Result<BufWriter<File>, RestoreError> {
 }
 
 fn create_owner_only_directory(path: &Path) -> Result<(), RestoreError> {
-    use std::os::unix::fs::PermissionsExt;
     fs::create_dir_all(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(path, 0o700)?;
     Ok(())
 }
 

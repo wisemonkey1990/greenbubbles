@@ -14,7 +14,9 @@ you can't finish setup. See the [key setup guide](PASSPHRASE_ACQUISITION.md).
 
 **macOS 14 or later, on Apple silicon.** Released builds are Apple silicon only;
 Intel Macs aren't built or tested. There's no Windows, Linux, Android, or iOS
-version, and none is planned.
+version, and none is planned. The Rust command-line tool does compile for
+Windows from source, as an experiment without a released build; see
+[Windows port](WINDOWS_PORT.md) for what works.
 
 **WeChat 4.1 or later only, and its format is private.** A WeChat update can
 change how data is stored at any time. When GreenBubbles meets data it can't

@@ -1,7 +1,7 @@
+use crate::platform::OpenOptionsExt;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -106,12 +106,12 @@ pub fn run_synthetic_benchmark(
         ensure_private_directory(work_directory)?;
     } else {
         fs::create_dir(work_directory)?;
-        fs::set_permissions(work_directory, fs::Permissions::from_mode(0o700))?;
+        crate::platform::set_mode(work_directory, 0o700)?;
     }
     let temporary = tempfile::Builder::new()
         .prefix("greenbubbles-synthetic-benchmark-")
         .tempdir_in(work_directory)?;
-    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(temporary.path(), 0o700)?;
     let key = ReplicaKey::from_bytes(SYNTHETIC_REPLICA_KEY);
     let mut cases = Vec::new();
 
@@ -523,12 +523,12 @@ fn measure_case(
 ) -> Result<SyntheticBenchmarkCase, RestoreError> {
     let case_root = root.join(definition.name);
     fs::create_dir(&case_root)?;
-    fs::set_permissions(&case_root, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(&case_root, 0o700)?;
     let mut observations = Vec::with_capacity(samples);
     for sample in 0..samples {
         let directory = case_root.join(format!("sample-{sample}"));
         fs::create_dir(&directory)?;
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+        crate::platform::set_mode(&directory, 0o700)?;
         observations.push(run(sample, &directory)?);
     }
     let mut durations = observations
@@ -667,7 +667,7 @@ fn build_archive(
 ) -> Result<PathBuf, RestoreError> {
     let archive = parent.join(name);
     fs::create_dir(&archive)?;
-    fs::set_permissions(&archive, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(&archive, 0o700)?;
     let relationship_count = messages
         .iter()
         .map(|message| message.relationships.len() as u64)
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn exercises_every_synthetic_sync_and_fault_case() {
         let temporary = tempfile::tempdir().unwrap();
-        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(temporary.path(), 0o700).unwrap();
         let report = run_synthetic_benchmark(
             temporary.path(),
             &SyntheticBenchmarkConfig {

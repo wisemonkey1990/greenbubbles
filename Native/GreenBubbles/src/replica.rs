@@ -1,8 +1,8 @@
+use crate::platform::OsStringExt;
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
-use std::os::unix::ffi::OsStringExt;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -1552,7 +1552,7 @@ pub fn prepare_replica_recovery(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(&candidate)?;
     let result = (|| {
         let (source, _) = open_existing_replica_read_only(&backup, key)?;
@@ -3686,7 +3686,7 @@ fn seal_replica_storage(path: &Path) -> Result<Vec<ReplicaStorageEntrySeal>, Res
                 ensure_private_regular_file(&candidate)?;
                 let mut file = OpenOptions::new()
                     .read(true)
-                    .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+                    .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
                     .open(&candidate)?;
                 let before = file.metadata()?;
                 let mut digest = Sha256::new();
@@ -4827,7 +4827,7 @@ fn open_replica(path: &Path, key: &ReplicaKey) -> Result<OpenedReplica, RestoreE
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(path)?;
     }
     let result = (|| {
@@ -5342,7 +5342,7 @@ fn create_pre_migration_backup(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(&path)?;
     let result = (|| {
         let mut destination = open_keyed_connection(&path, key)?;
@@ -7946,7 +7946,7 @@ fn secure_replica_files(path: &Path) -> Result<(), RestoreError> {
                     "replica storage contains an unsafe file identity".to_string(),
                 ));
             }
-            fs::set_permissions(candidate, fs::Permissions::from_mode(0o600))?;
+            crate::platform::set_mode(candidate, 0o600)?;
         }
     }
     Ok(())

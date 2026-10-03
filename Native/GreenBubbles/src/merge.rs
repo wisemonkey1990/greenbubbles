@@ -1,8 +1,8 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use serde::{de::DeserializeOwned, Serialize};
@@ -97,7 +97,7 @@ pub fn merge_incremental_archive(
     let temporary = tempfile::Builder::new()
         .prefix(".greenbubbles-merge-")
         .tempdir_in(&output_parent)?;
-    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(temporary.path(), 0o700)?;
 
     let mut messages = merge_messages(previous_archive, fragment_archive, &selected, &affected)?;
     order_and_resolve_messages(&mut messages);
@@ -1122,7 +1122,7 @@ fn relocate_one_artifact(
     let media = temporary_archive.join("media");
     if !media.exists() {
         fs::create_dir(&media)?;
-        fs::set_permissions(&media, fs::Permissions::from_mode(0o700))?;
+        crate::platform::set_mode(&media, 0o700)?;
     }
     let identity = hex::encode(Sha256::digest(artifact_id.as_bytes()));
     let extension = source
@@ -1149,13 +1149,13 @@ fn copy_verified_private_file(
 ) -> Result<(), RestoreError> {
     let mut input = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(source)?;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(destination)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 128 * 1024];
@@ -1723,7 +1723,7 @@ fn owner_only_writer(path: &Path) -> Result<BufWriter<File>, RestoreError> {
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(path)?,
     ))
 }
@@ -1731,7 +1731,9 @@ fn owner_only_writer(path: &Path) -> Result<BufWriter<File>, RestoreError> {
 fn sync_directory(path: &Path) -> Result<(), RestoreError> {
     let directory = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .custom_flags(
+            crate::platform::O_CLOEXEC | crate::platform::O_DIRECTORY | crate::platform::O_NOFOLLOW,
+        )
         .open(path)?;
     directory.sync_all()?;
     Ok(())

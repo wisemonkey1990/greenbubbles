@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -3285,7 +3285,7 @@ pub(crate) fn is_send_adapter_operation(operation: &str) -> bool {
 fn read_connector_draft_file(path: &Path) -> Result<Vec<u8>, RestoreError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     if !before.is_file()
@@ -3594,7 +3594,7 @@ fn write_owner_only_json(path: &Path, value: &impl Serialize) -> Result<(), Rest
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let mut writer = BufWriter::new(file);
     serde_json::to_writer_pretty(&mut writer, value)?;
@@ -3613,7 +3613,7 @@ pub(crate) fn append_owner_only_connector_event(
         .append(true)
         .create(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
@@ -3621,10 +3621,7 @@ pub(crate) fn append_owner_only_connector_event(
             "connector audit log must be an owner-only regular file with one link".to_string(),
         ));
     }
-    let descriptor = std::os::fd::AsRawFd::as_raw_fd(&file);
-    if unsafe { libc::flock(descriptor, libc::LOCK_EX) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    file.lock()?;
     let result = (|| -> Result<(), RestoreError> {
         let previous = read_last_audit_line(&mut file)?
             .as_deref()
@@ -3639,11 +3636,9 @@ pub(crate) fn append_owner_only_connector_event(
         file.sync_data()?;
         Ok(())
     })();
-    let unlock = unsafe { libc::flock(descriptor, libc::LOCK_UN) };
+    let unlock = file.unlock();
     result?;
-    if unlock != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    unlock?;
     Ok(())
 }
 
@@ -3711,16 +3706,11 @@ fn verified_connector_log_for_account(
 ) -> Result<(ConnectorAuditReport, Vec<ConnectorAuditEvent>), RestoreError> {
     ensure_private_regular_file(path)?;
     let file = File::open(path)?;
-    let descriptor = std::os::fd::AsRawFd::as_raw_fd(&file);
-    if unsafe { libc::flock(descriptor, libc::LOCK_SH) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    file.lock_shared()?;
     let result = audit_connector_log_file(&file, expected_account_id);
-    let unlock = unsafe { libc::flock(descriptor, libc::LOCK_UN) };
+    let unlock = file.unlock();
     let report = result?;
-    if unlock != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    unlock?;
     Ok(report)
 }
 
@@ -4219,7 +4209,7 @@ mod audit_tests {
     #[test]
     fn chains_new_events_after_a_reported_legacy_prefix_and_detects_tampering() {
         let temporary = tempfile::tempdir().unwrap();
-        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(temporary.path(), 0o700).unwrap();
         let path = temporary.path().join("audit.ndjson");
         let mut legacy = OpenOptions::new()
             .write(true)

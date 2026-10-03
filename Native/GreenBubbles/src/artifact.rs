@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
@@ -721,11 +721,11 @@ impl ArtifactResolver {
             .map_err(|_| RestoreError::UnsafePath(path.display().to_string()))?;
         let mut file = match OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .custom_flags(crate::platform::O_NOFOLLOW | crate::platform::O_CLOEXEC)
             .open(&canonical)
         {
             Ok(file) => file,
-            Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            Err(error) if error.raw_os_error() == Some(crate::platform::ELOOP) => {
                 return Ok(self.record_unsafe_path(
                     path,
                     kind,
@@ -1474,7 +1474,7 @@ fn same_file_version(before: &fs::Metadata, after: &fs::Metadata) -> bool {
 
 fn create_owner_only_directory(path: &Path) -> Result<(), RestoreError> {
     fs::create_dir_all(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(path, 0o700)?;
     Ok(())
 }
 

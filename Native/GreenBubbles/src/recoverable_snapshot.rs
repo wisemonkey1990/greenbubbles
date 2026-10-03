@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -493,7 +493,7 @@ fn validate_private_capture_file(
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
         || metadata.mode() & 0o077 != 0
     {
@@ -656,7 +656,7 @@ where
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-recoverable-snapshot-")
         .tempdir_in(&output_parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
     let data_root = staging.path().join(DATA_DIRECTORY_NAME);
     create_private_directory(&data_root)?;
 
@@ -813,7 +813,7 @@ pub fn rewrap_recoverable_snapshot_protectors_with_optional_protectors(
     let staging = tempfile::Builder::new()
         .prefix(".greenbubbles-protector-rewrap-")
         .tempdir_in(&output_parent)?;
-    fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(staging.path(), 0o700)?;
     let destination_data_root = staging.path().join(DATA_DIRECTORY_NAME);
     create_private_directory(&destination_data_root)?;
     let source_data_root = source.join(DATA_DIRECTORY_NAME);
@@ -1355,7 +1355,7 @@ fn inventory_source_databases(root: &Path) -> Result<Vec<PathBuf>, RecoverableSn
             continue;
         }
         let metadata = fs::metadata(path)?;
-        if metadata.uid() != unsafe { libc::geteuid() } {
+        if metadata.uid() != crate::platform::geteuid() {
             return Err(RecoverableSnapshotError::UnsafePath(
                 "source database is not owned by the current user".into(),
             ));
@@ -1415,7 +1415,7 @@ fn copy_encrypted_database_bytes_unchanged(
     reject_sqlite_sidecars(source_path)?;
     let mut source = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(source_path)?;
     let before = source.metadata()?;
     if before.len() != expected_byte_count {
@@ -1428,7 +1428,7 @@ fn copy_encrypted_database_bytes_unchanged(
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(destination_path)?;
         let mut writer = BufWriter::new(destination);
         let copied = std::io::copy(&mut source, &mut writer)?;
@@ -1440,7 +1440,7 @@ fn copy_encrypted_database_bytes_unchanged(
                 "encrypted database byte copy was incomplete".into(),
             ));
         }
-        fs::set_permissions(destination_path, fs::Permissions::from_mode(0o600))?;
+        crate::platform::set_mode(destination_path, 0o600)?;
         let after = source.metadata()?;
         if before.dev() != after.dev()
             || before.ino() != after.ino()
@@ -1478,7 +1478,7 @@ fn copy_database_logically(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(destination_path)
         .map_err(|_| database_failure(logical_path, "destination could not be created"))?;
     let result = (|| {
@@ -1509,7 +1509,7 @@ fn copy_database_logically(
         )?;
         verify_sqlite_integrity(&destination)?;
         drop(destination);
-        fs::set_permissions(destination_path, fs::Permissions::from_mode(0o600))?;
+        crate::platform::set_mode(destination_path, 0o600)?;
         reject_sqlite_sidecars(destination_path)?;
         Ok::<(), RecoverableSnapshotError>(())
     })();
@@ -1720,7 +1720,7 @@ fn validate_private_directory(
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.mode() & 0o077 != 0
     {
         return Err(RecoverableSnapshotError::UnsafePath(format!(
@@ -1739,7 +1739,7 @@ fn validate_private_regular_file(
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
         || metadata.mode() & 0o077 != 0
     {
@@ -1752,7 +1752,7 @@ fn validate_private_regular_file(
 
 fn create_private_directory(path: &Path) -> Result<(), RecoverableSnapshotError> {
     fs::create_dir(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    crate::platform::set_mode(path, 0o700)?;
     Ok(())
 }
 
@@ -1931,7 +1931,7 @@ fn write_manifest_create_new(
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let mut writer = BufWriter::new(file);
     serde_json::to_writer_pretty(&mut writer, manifest)?;
@@ -1948,7 +1948,7 @@ fn load_manifest_from_canonical_snapshot(
     validate_private_regular_file(&path, "recoverable snapshot manifest")?;
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let metadata = file.metadata()?;
     if metadata.len() == 0 || metadata.len() > MAXIMUM_MANIFEST_BYTES {
@@ -1964,7 +1964,7 @@ fn hash_private_file(path: &Path) -> Result<(u64, String), RecoverableSnapshotEr
     validate_private_regular_file(path, "snapshot database")?;
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     let mut digest = Sha256::new();
@@ -1993,7 +1993,7 @@ fn hash_private_file(path: &Path) -> Result<(u64, String), RecoverableSnapshotEr
 fn read_prefix(path: &Path, byte_count: usize) -> Result<Vec<u8>, RecoverableSnapshotError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let mut bytes = vec![0u8; byte_count];
     let mut offset = 0usize;

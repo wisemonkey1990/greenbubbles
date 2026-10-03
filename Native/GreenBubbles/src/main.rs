@@ -1,10 +1,10 @@
 #![recursion_limit = "256"]
 
+use greenbubbles::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -465,10 +465,7 @@ fn require_exact_argument_count(
 }
 
 fn query_profile_template() -> Result<String, Box<dyn std::error::Error>> {
-    let home = env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/you"));
+    let home = greenbubbles::platform::home_dir().unwrap_or_else(|| PathBuf::from("/Users/you"));
     let credential_directory = home.join(".greenbubbles/credentials");
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "schema": QUERY_PROFILE_SCHEMA,
@@ -4844,7 +4841,7 @@ fn owner_only_create_new_writer(path: &Path) -> io::Result<BufWriter<File>> {
     let parent_metadata = std::fs::symlink_metadata(parent)?;
     if !parent_metadata.is_dir()
         || parent_metadata.file_type().is_symlink()
-        || parent_metadata.uid() != unsafe { libc::geteuid() }
+        || parent_metadata.uid() != greenbubbles::platform::geteuid()
         || parent_metadata.mode() & 0o077 != 0
     {
         return Err(io::Error::new(
@@ -4856,11 +4853,11 @@ fn owner_only_create_new_writer(path: &Path) -> io::Result<BufWriter<File>> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(greenbubbles::platform::O_NOFOLLOW | greenbubbles::platform::O_CLOEXEC)
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != greenbubbles::platform::geteuid()
         || metadata.mode() & 0o077 != 0
     {
         return Err(io::Error::new(
@@ -5755,7 +5752,10 @@ const fn send_command_help() -> &'static str {
 /// A documented configuration skeleton. It is deliberately emitted in the
 /// safest possible state: dry run, kill switch engaged, no gate evidence.
 fn send_config_template() -> Result<String, Box<dyn std::error::Error>> {
-    let home = env::var("HOME").unwrap_or_else(|_| "/Users/you".to_string());
+    let home = greenbubbles::platform::home_dir().map_or_else(
+        || "/Users/you".to_string(),
+        |path| path.display().to_string(),
+    );
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "formatVersion": 1,
         "accountId": "REPLACE-WITH-THE-REPLICA-ACCOUNT-ID",

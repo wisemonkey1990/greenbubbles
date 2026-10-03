@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1410,7 +1410,7 @@ fn write_owner_only_json(path: &Path, value: &impl Serialize) -> Result<(), Rest
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let mut writer = BufWriter::new(file);
     serde_json::to_writer_pretty(&mut writer, value)?;
@@ -1428,7 +1428,7 @@ fn append_owner_only_json_line(path: &Path, value: &impl Serialize) -> Result<()
         .append(true)
         .create(true)
         .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
@@ -1436,10 +1436,7 @@ fn append_owner_only_json_line(path: &Path, value: &impl Serialize) -> Result<()
             "audit log must be an owner-only regular file with one link".to_string(),
         ));
     }
-    let descriptor = std::os::fd::AsRawFd::as_raw_fd(&file);
-    if unsafe { libc::flock(descriptor, libc::LOCK_EX) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    file.lock()?;
     let write_result = (|| -> Result<(), RestoreError> {
         serde_json::to_writer(&mut file, value)?;
         file.write_all(b"\n")?;
@@ -1447,10 +1444,8 @@ fn append_owner_only_json_line(path: &Path, value: &impl Serialize) -> Result<()
         file.sync_data()?;
         Ok(())
     })();
-    let unlock_result = unsafe { libc::flock(descriptor, libc::LOCK_UN) };
+    let unlock_result = file.unlock();
     write_result?;
-    if unlock_result != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
+    unlock_result?;
     Ok(())
 }

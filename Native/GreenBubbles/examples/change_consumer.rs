@@ -1,8 +1,8 @@
+use greenbubbles::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use greenbubbles::connector::{
@@ -446,15 +446,18 @@ fn write_private_atomically(
         .prefix(".greenbubbles-consumer-")
         .tempfile_in(parent)
         .map_err(|error| error.to_string())?;
-    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o600))
-        .map_err(|error| error.to_string())?;
+    greenbubbles::platform::set_mode(temporary.path(), 0o600).map_err(|error| error.to_string())?;
     let file = temporary.as_file_mut();
     write(file)?;
     file.sync_all().map_err(|error| error.to_string())?;
     temporary.persist(path).map_err(|error| error.to_string())?;
     let directory = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .custom_flags(
+            greenbubbles::platform::O_CLOEXEC
+                | greenbubbles::platform::O_DIRECTORY
+                | greenbubbles::platform::O_NOFOLLOW,
+        )
         .open(parent)
         .map_err(|error| error.to_string())?;
     directory.sync_all().map_err(|error| error.to_string())?;

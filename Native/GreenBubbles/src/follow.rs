@@ -1,7 +1,7 @@
+use crate::platform::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -1275,7 +1275,7 @@ impl ControlLock {
             .write(true)
             .create(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(lock_path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file()
@@ -1286,18 +1286,14 @@ impl ControlLock {
                 "replica control lock is not an owner-only single-link regular file".to_string(),
             ));
         }
-        let descriptor = std::os::fd::AsRawFd::as_raw_fd(&file);
-        if unsafe { libc::flock(descriptor, libc::LOCK_EX) } != 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
+        file.lock()?;
         Ok(Self { file })
     }
 }
 
 impl Drop for ControlLock {
     fn drop(&mut self) {
-        let descriptor = std::os::fd::AsRawFd::as_raw_fd(&self.file);
-        let _ = unsafe { libc::flock(descriptor, libc::LOCK_UN) };
+        let _ = self.file.unlock();
     }
 }
 
@@ -1388,7 +1384,7 @@ fn read_owner_only_file_limited(path: &Path, maximum_bytes: u64) -> Result<Vec<u
     ensure_private_regular_file(path)?;
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     if before.len() > maximum_bytes {
@@ -1457,7 +1453,7 @@ fn write_atomic_owner_bytes(path: &Path, bytes: &[u8], label: &str) -> Result<()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(&temporary)?;
         let mut file = file;
         file.write_all(bytes)?;
@@ -1590,7 +1586,7 @@ fn archive_seal(root: &Path) -> Result<ArchiveSeal, RestoreError> {
 fn digest_stable_file(path: &Path) -> Result<(u64, [u8; 32]), RestoreError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
         .open(path)?;
     let before = file.metadata()?;
     let mut digest = Sha256::new();
@@ -1634,7 +1630,7 @@ mod tests {
     #[test]
     fn next_publication_rejects_a_predecessor_changed_during_preparation() {
         let fixture = tempfile::tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let first = minimal_archive(fixture.path(), "first", "source-first");
         let concurrent = minimal_archive(fixture.path(), "concurrent", "source-concurrent");
         let pending = minimal_archive(fixture.path(), "pending", "source-pending");
@@ -1667,10 +1663,10 @@ mod tests {
     #[test]
     fn quarantines_only_retired_archives_and_restores_them_by_generation() {
         let fixture = tempfile::tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let quarantine = fixture.path().join("quarantine");
         fs::create_dir(&quarantine).unwrap();
-        fs::set_permissions(&quarantine, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&quarantine, 0o700).unwrap();
         let first = minimal_archive(fixture.path(), "first", "source-first");
         let second = minimal_archive(fixture.path(), "second", "source-second");
         let third = minimal_archive(fixture.path(), "third", "source-third");
@@ -1725,7 +1721,7 @@ mod tests {
     #[test]
     fn refuses_to_reuse_a_published_path_for_mutated_contents() {
         let fixture = tempfile::tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let archive = minimal_archive(fixture.path(), "archive", "source-first");
         let handoff = fixture.path().join("handoff.json");
         publish_replica_handoff(&archive, &handoff, 1).unwrap();
@@ -1748,10 +1744,10 @@ mod tests {
     #[test]
     fn protects_shared_paths_and_recovers_interrupted_quarantine_moves() {
         let fixture = tempfile::tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let quarantine = fixture.path().join("quarantine");
         fs::create_dir(&quarantine).unwrap();
-        fs::set_permissions(&quarantine, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&quarantine, 0o700).unwrap();
         let shared = minimal_archive(fixture.path(), "shared", "source-shared");
         let retired = minimal_archive(fixture.path(), "retired", "source-retired");
         let current = minimal_archive(fixture.path(), "current", "source-current");
@@ -1791,10 +1787,10 @@ mod tests {
     #[test]
     fn quarantine_never_replaces_a_preexisting_filesystem_entry() {
         let fixture = tempfile::tempdir().unwrap();
-        fs::set_permissions(fixture.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(fixture.path(), 0o700).unwrap();
         let quarantine = fixture.path().join("quarantine");
         fs::create_dir(&quarantine).unwrap();
-        fs::set_permissions(&quarantine, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&quarantine, 0o700).unwrap();
         let first = minimal_archive(fixture.path(), "first", "source-first");
         let second = minimal_archive(fixture.path(), "second", "source-second");
         let third = minimal_archive(fixture.path(), "third", "source-third");
@@ -1810,7 +1806,7 @@ mod tests {
         let indices = groups.get(first_path.to_str().unwrap()).unwrap();
         let quarantine_root = fs::canonicalize(&quarantine).unwrap();
         let destination = group_quarantine_path(&history, indices, &quarantine_root).unwrap();
-        std::os::unix::fs::symlink("missing-target", &destination).unwrap();
+        crate::platform::symlink("missing-target", &destination).unwrap();
 
         assert!(quarantine_retired_replica_archives(&handoff, &quarantine, 2).is_err());
         assert!(first.is_dir());
@@ -1825,7 +1821,7 @@ mod tests {
     fn minimal_archive(parent: &Path, name: &str, source_fingerprint: &str) -> PathBuf {
         let archive = parent.join(name);
         fs::create_dir(&archive).unwrap();
-        fs::set_permissions(&archive, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&archive, 0o700).unwrap();
         let report = RestorationReport {
             format_version: 2,
             account_id: "synthetic-account".to_string(),
@@ -1853,7 +1849,7 @@ mod tests {
         };
         let report_path = archive.join("report.json");
         fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-        fs::set_permissions(report_path, fs::Permissions::from_mode(0o600)).unwrap();
+        crate::platform::set_mode(report_path, 0o600).unwrap();
         archive
     }
 }

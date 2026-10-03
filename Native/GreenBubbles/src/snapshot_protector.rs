@@ -1,6 +1,6 @@
+use crate::platform::{MetadataExt, OpenOptionsExt};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufWriter, Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -160,7 +160,7 @@ impl SnapshotRecoveryWords {
         let path = validate_private_recovery_kit_file(path)?;
         let file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(path)?;
         let metadata = file.metadata()?;
         if metadata.len() == 0 || metadata.len() > MAXIMUM_RECOVERY_KIT_BYTES {
@@ -201,13 +201,13 @@ impl SnapshotRecoveryWords {
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
-                .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+                .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
                 .open(&final_path)?;
             let mut writer = BufWriter::new(file);
             writer.write_all(content.as_bytes())?;
             writer.flush()?;
             writer.get_ref().sync_all()?;
-            fs::set_permissions(&final_path, fs::Permissions::from_mode(0o600))?;
+            crate::platform::set_mode(&final_path, 0o600)?;
             File::open(&parent)?.sync_all()?;
             let _ = validate_private_recovery_kit_file(&final_path)?;
             let reparsed = Self::read_private_file(&final_path)?;
@@ -253,7 +253,7 @@ impl SnapshotLocalCredential {
         let path = validate_private_local_credential_file(path)?;
         let file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
             .open(path)?;
         let metadata = file.metadata()?;
         if metadata.len() == 0 || metadata.len() > MAXIMUM_LOCAL_CREDENTIAL_BYTES {
@@ -293,13 +293,13 @@ impl SnapshotLocalCredential {
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
-                .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+                .custom_flags(crate::platform::O_CLOEXEC | crate::platform::O_NOFOLLOW)
                 .open(&final_path)?;
             let mut writer = BufWriter::new(file);
             writer.write_all(content.as_bytes())?;
             writer.flush()?;
             writer.get_ref().sync_all()?;
-            fs::set_permissions(&final_path, fs::Permissions::from_mode(0o600))?;
+            crate::platform::set_mode(&final_path, 0o600)?;
             File::open(&parent)?.sync_all()?;
             let _ = validate_private_local_credential_file(&final_path)?;
             let reparsed = Self::read_private_file(&final_path)?;
@@ -848,7 +848,7 @@ fn validate_private_recovery_kit_file(path: &Path) -> Result<PathBuf, SnapshotPr
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
         || metadata.mode() & 0o077 != 0
     {
@@ -866,7 +866,7 @@ fn validate_private_local_credential_file(path: &Path) -> Result<PathBuf, Snapsh
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.nlink() != 1
         || metadata.mode() & 0o077 != 0
     {
@@ -903,7 +903,7 @@ fn validate_owner_only_directory(
         .map_err(|_| SnapshotProtectorError::UnsafePath(format!("{description} is unavailable")))?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
         || metadata.mode() & 0o077 != 0
     {
         return Err(SnapshotProtectorError::UnsafePath(format!(
@@ -1131,7 +1131,7 @@ mod tests {
     #[test]
     fn recovery_kit_is_private_checksummed_and_never_overwritten() {
         let directory = tempfile::tempdir().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         let path = directory.path().join("kit.txt");
         let report = SnapshotRecoveryWords::write_new_private_file(&path).unwrap();
         assert_eq!(report.word_count, 24);
@@ -1177,7 +1177,7 @@ mod tests {
     #[test]
     fn local_credential_file_is_private_durable_and_never_overwritten() {
         let directory = tempfile::tempdir().unwrap();
-        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(directory.path(), 0o700).unwrap();
         let path = directory.path().join(".local-unlock");
         let report = SnapshotLocalCredential::write_new_private_file(&path).unwrap();
         assert!(report.local_convenience);

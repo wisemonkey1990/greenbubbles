@@ -1,7 +1,7 @@
+use crate::platform::MetadataExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Cursor, Read};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -98,7 +98,7 @@ impl<'a> LiveQuerySource<'a> {
                 "database root must be a real directory, not a symbolic link".into(),
             ));
         }
-        if input_metadata.uid() != unsafe { libc::geteuid() } {
+        if input_metadata.uid() != crate::platform::geteuid() {
             return Err(LiveQueryError::UnsafeSource(
                 "database root must be owned by the current user".into(),
             ));
@@ -243,7 +243,7 @@ impl<'a> LiveQuerySource<'a> {
                 "database must be a real regular file".into(),
             ));
         }
-        if metadata.uid() != unsafe { libc::geteuid() } {
+        if metadata.uid() != crate::platform::geteuid() {
             return Err(LiveQueryError::UnsafeSource(
                 "database must be owned by the current user".into(),
             ));
@@ -278,7 +278,7 @@ impl<'a> LiveQuerySource<'a> {
             .map_err(|_| LiveQueryError::UnsafeSource(format!("{description} is unavailable")))?;
         if metadata.file_type().is_symlink()
             || !metadata.is_dir()
-            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.uid() != crate::platform::geteuid()
         {
             return Err(LiveQueryError::UnsafeSource(format!(
                 "{description} is not a current-user-owned real directory"
@@ -504,7 +504,7 @@ fn live_account_holder_source_id(root: &Path) -> Result<Option<String>, LiveQuer
     })?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
     {
         return Err(LiveQueryError::UnsafeSource(
             "account directory must be a current-user-owned real directory".into(),
@@ -551,7 +551,7 @@ fn live_account_holder_source_id(root: &Path) -> Result<Option<String>, LiveQuer
             .is_some_and(|value| {
                 value.is_dir()
                     && !value.file_type().is_symlink()
-                    && value.uid() == unsafe { libc::geteuid() }
+                    && value.uid() == crate::platform::geteuid()
             });
     Ok(Some(if independently_confirmed {
         candidate.to_string()
@@ -1356,7 +1356,7 @@ fn sqlite_sidecar_size(database_path: &Path, suffix: &str) -> Result<(bool, u64)
     };
     if metadata.file_type().is_symlink()
         || !metadata.is_file()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != crate::platform::geteuid()
     {
         return Err(LiveQueryError::UnsafeSource(
             "SQLite sidecar must be a current-user-owned regular file".into(),
@@ -6805,7 +6805,7 @@ mod tests {
         fs::create_dir_all(root.join("contact")).unwrap();
         fs::create_dir_all(root.join("session")).unwrap();
         fs::create_dir_all(root.join("message")).unwrap();
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&root, 0o700).unwrap();
         let blob = wx_db::encode_room_data_for_test(&[
             ("wxid_member", Some("小林")),
             ("wxid_blank", Some("  ")),
@@ -6850,7 +6850,7 @@ mod tests {
         assert!(rank_cursor_offset(&token, 20).is_err());
     }
 
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use crate::platform::symlink;
 
     use rusqlite::Connection;
     use tempfile::TempDir;
@@ -6899,7 +6899,7 @@ mod tests {
         fs::create_dir_all(root.join("contact")).unwrap();
         fs::create_dir_all(root.join("session")).unwrap();
         fs::create_dir_all(root.join("message")).unwrap();
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::platform::set_mode(&root, 0o700).unwrap();
 
         let contact = Connection::open(root.join("contact/contact.db")).unwrap();
         contact
